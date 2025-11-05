@@ -3,45 +3,42 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import DashboardStats from "@/components/DashboardStats";
 import TipsList from "@/components/TipsList";
-import { LayoutDashboard, QrCode, LogOut } from "lucide-react";
+import { LayoutDashboard, QrCode, LogOut, AlertCircle } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function Dashboard() {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
+  const { worker, logout, isLoading } = useAuth();
 
-  const mockStats = {
-    today: 2450,
-    week: 15680,
-    month: 48920,
-  };
+  const { data: statsData } = useQuery({
+    queryKey: ["/api/me/stats"],
+    queryFn: api.tips.getMyStats,
+    enabled: !!worker,
+  });
 
-  const mockTips = [
-    {
-      id: "1",
-      amountGrossCents: 500,
-      amountNetCents: 480,
-      currency: "USD",
-      status: "succeeded" as const,
-      note: "Great service, thank you!",
-      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-    },
-    {
-      id: "2",
-      amountGrossCents: 1000,
-      amountNetCents: 970,
-      currency: "USD",
-      status: "succeeded" as const,
-      createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000),
-    },
-    {
-      id: "3",
-      amountGrossCents: 200,
-      amountNetCents: 190,
-      currency: "USD",
-      status: "succeeded" as const,
-      note: "Keep up the good work! You made my day better.",
-      createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-    },
-  ];
+  const { data: tipsData } = useQuery({
+    queryKey: ["/api/me/tips"],
+    queryFn: () => api.tips.getMyTips(),
+    enabled: !!worker,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  if (!worker) {
+    setLocation("/onboarding");
+    return null;
+  }
+
+  const stats = statsData || { today: 0, week: 0, month: 0 };
+  const tips = tipsData?.tips || [];
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -72,7 +69,7 @@ export default function Dashboard() {
                   My QR
                 </Button>
               </Link>
-              <Button variant="ghost" size="sm" data-testid="button-logout">
+              <Button variant="ghost" size="sm" onClick={logout} data-testid="button-logout">
                 <LogOut className="w-4 h-4" />
               </Button>
             </div>
@@ -89,14 +86,35 @@ export default function Dashboard() {
             </p>
           </div>
 
-          <DashboardStats stats={mockStats} />
+          {!worker.tipsEnabled && (
+            <Card className="border-yellow-500/50 bg-yellow-500/10">
+              <CardContent className="p-4 flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5" />
+                <div className="flex-1">
+                  <h3 className="font-semibold text-yellow-900 dark:text-yellow-100">
+                    Complete Stripe Onboarding
+                  </h3>
+                  <p className="text-sm text-yellow-800 dark:text-yellow-200 mt-1">
+                    You need to complete your Stripe Connect onboarding to start receiving tips.
+                  </p>
+                  <Link href="/onboarding">
+                    <Button variant="outline" size="sm" className="mt-3">
+                      Complete Onboarding
+                    </Button>
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <DashboardStats stats={stats} />
 
           <Card>
             <CardHeader>
               <CardTitle>Recent Tips</CardTitle>
             </CardHeader>
             <CardContent>
-              <TipsList tips={mockTips} />
+              <TipsList tips={tips} />
             </CardContent>
           </Card>
         </div>

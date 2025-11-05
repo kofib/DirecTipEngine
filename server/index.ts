@@ -1,19 +1,46 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import cookieParser from "cookie-parser";
+import { rateLimit } from "express-rate-limit";
 
 const app = express();
+
+app.set("trust proxy", 1);
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use(limiter);
+app.use("/api/auth/otp", strictLimiter);
+
+app.use(cookieParser());
 
 declare module 'http' {
   interface IncomingMessage {
     rawBody: unknown
   }
 }
-app.use(express.json({
-  verify: (req, _res, buf) => {
-    req.rawBody = buf;
+
+app.use((req, res, next) => {
+  if (req.path === "/api/webhooks/stripe") {
+    express.raw({ type: "application/json" })(req, res, next);
+  } else {
+    express.json()(req, res, next);
   }
-}));
+});
+
 app.use(express.urlencoded({ extended: false }));
 
 app.use((req, res, next) => {

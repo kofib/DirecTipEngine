@@ -2,14 +2,16 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import QRCodeDisplay from "@/components/QRCodeDisplay";
 import { ArrowLeft } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function QRPage() {
-  const workerData = {
-    handle: "sarah",
-    displayName: "Sarah Johnson",
-  };
+  const { worker } = useAuth();
 
-  const tipUrl = `${window.location.origin}/${workerData.handle}`;
+  if (!worker) {
+    return null;
+  }
+
+  const tipUrl = `${window.location.origin}/${worker.handle}`;
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -35,7 +37,7 @@ export default function QRPage() {
             </p>
           </div>
 
-          <QRCodeDisplay url={tipUrl} workerName={workerData.displayName} />
+          <QRCodeDisplay url={tipUrl} workerName={worker.displayName} />
 
           <div className="bg-muted/50 p-6 rounded-lg space-y-2">
             <h3 className="font-semibold">Tips for using your QR code:</h3>

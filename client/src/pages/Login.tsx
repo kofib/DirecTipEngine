@@ -1,32 +1,63 @@
 import { useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft } from "lucide-react";
 import OTPInput from "@/components/OTPInput";
+import { useMutation } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [otpSent, setOtpSent] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+
+  const sendOTPMutation = useMutation({
+    mutationFn: () => api.auth.sendOTP(email),
+    onSuccess: () => {
+      setOtpSent(true);
+      toast({
+        title: "Code sent",
+        description: `We sent a verification code to ${email}`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to send code",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const verifyOTPMutation = useMutation({
+    mutationFn: (code: string) => api.auth.verifyOTP(email, code),
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "You're logged in!",
+      });
+      setLocation("/dashboard");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Invalid code",
+        variant: "destructive",
+      });
+    },
+  });
 
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    console.log("Sending OTP to:", email);
-    
-    setTimeout(() => {
-      setOtpSent(true);
-      setLoading(false);
-    }, 1000);
+    sendOTPMutation.mutate();
   };
 
   const handleOTPComplete = (otp: string) => {
-    console.log("Verifying OTP:", otp);
-    setTimeout(() => {
-      console.log("OTP verified, redirecting to dashboard");
-    }, 500);
+    verifyOTPMutation.mutate(otp);
   };
 
   return (
@@ -70,15 +101,18 @@ export default function Login() {
                   type="submit"
                   className="w-full"
                   size="lg"
-                  disabled={loading || !email}
+                  disabled={sendOTPMutation.isPending || !email}
                   data-testid="button-send-otp"
                 >
-                  {loading ? "Sending..." : "Send Verification Code"}
+                  {sendOTPMutation.isPending ? "Sending..." : "Send Verification Code"}
                 </Button>
               </form>
             ) : (
               <div className="space-y-6">
                 <OTPInput onComplete={handleOTPComplete} />
+                {verifyOTPMutation.isPending && (
+                  <p className="text-center text-sm text-muted-foreground">Verifying...</p>
+                )}
                 <Button
                   variant="ghost"
                   className="w-full"

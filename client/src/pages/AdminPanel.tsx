@@ -6,63 +6,82 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Search } from "lucide-react";
-
-interface Worker {
-  id: string;
-  displayName: string;
-  handle: string;
-  photoUrl?: string;
-  tipsEnabled: boolean;
-  suspended: boolean;
-  lastTipAmount?: number;
-  lastTipDate?: Date;
-}
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 export default function AdminPanel() {
-  const [platformFee, setPlatformFee] = useState("200");
+  const [platformFee, setPlatformFee] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
-  const mockWorkers: Worker[] = [
-    {
-      id: "1",
-      displayName: "Sarah Johnson",
-      handle: "sarah",
-      tipsEnabled: true,
-      suspended: false,
-      lastTipAmount: 500,
-      lastTipDate: new Date(Date.now() - 2 * 60 * 60 * 1000),
+  const { data: workersData } = useQuery({
+    queryKey: ["/api/admin/workers"],
+    queryFn: api.admin.getWorkers,
+  });
+
+  const { data: settingsData } = useQuery({
+    queryKey: ["/api/admin/settings"],
+    queryFn: api.admin.getSettings,
+  });
+
+  if (settingsData && !platformFee) {
+    setPlatformFee(settingsData.platformFeeBps.toString());
+  }
+
+  const updateFeeMutation = useMutation({
+    mutationFn: () =>
+      api.admin.updateSettings({ platformFeeBps: parseInt(platformFee) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings"] });
+      toast({
+        title: "Success",
+        description: "Platform fee updated",
+      });
     },
-    {
-      id: "2",
-      displayName: "Mike Chen",
-      handle: "mike",
-      tipsEnabled: true,
-      suspended: false,
-      lastTipAmount: 1000,
-      lastTipDate: new Date(Date.now() - 5 * 60 * 60 * 1000),
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update fee",
+        variant: "destructive",
+      });
     },
-    {
-      id: "3",
-      displayName: "Emma Davis",
-      handle: "emma",
-      tipsEnabled: false,
-      suspended: false,
+  });
+
+  const toggleSuspendMutation = useMutation({
+    mutationFn: ({ id, suspended }: { id: string; suspended: boolean }) =>
+      api.admin.updateWorker(id, { suspended }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/workers"] });
+      toast({
+        title: "Success",
+        description: "Worker status updated",
+      });
     },
-  ];
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update worker",
+        variant: "destructive",
+      });
+    },
+  });
 
-  const handleSaveFee = () => {
-    console.log("Saving platform fee:", platformFee);
-  };
-
-  const handleToggleSuspend = (workerId: string, currentState: boolean) => {
-    console.log(`Toggle suspend for worker ${workerId}:`, !currentState);
-  };
-
-  const filteredWorkers = mockWorkers.filter(
+  const workers = workersData?.workers || [];
+  const filteredWorkers = workers.filter(
     (w) =>
       w.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       w.handle.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handleSaveFee = () => {
+    updateFeeMutation.mutate();
+  };
+
+  const handleToggleSuspend = (workerId: string, currentState: boolean) => {
+    toggleSuspendMutation.mutate({ id: workerId, suspended: !currentState });
+  };
 
   return (
     <div className="min-h-screen bg-muted/30 p-4">
@@ -91,11 +110,15 @@ export default function AdminPanel() {
                   data-testid="input-platform-fee"
                 />
                 <p className="text-xs text-muted-foreground">
-                  {platformFee} bps = {(parseInt(platformFee) / 100).toFixed(2)}%
+                  {platformFee ? (parseInt(platformFee) / 100).toFixed(2) : "0"}%
                 </p>
               </div>
-              <Button onClick={handleSaveFee} data-testid="button-save-fee">
-                Save Fee
+              <Button
+                onClick={handleSaveFee}
+                disabled={updateFeeMutation.isPending}
+                data-testid="button-save-fee"
+              >
+                {updateFeeMutation.isPending ? "Saving..." : "Save Fee"}
               </Button>
             </div>
           </CardContent>
@@ -144,11 +167,6 @@ export default function AdminPanel() {
                           ) : (
                             <Badge variant="secondary">Pending</Badge>
                           )}
-                          {worker.lastTipAmount && (
-                            <div className="text-muted-foreground mt-1">
-                              Last: ${(worker.lastTipAmount / 100).toFixed(2)}
-                            </div>
-                          )}
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -161,9 +179,10 @@ export default function AdminPanel() {
                           <Switch
                             id={`suspend-${worker.id}`}
                             checked={worker.suspended}
-                            onCheckedChange={(checked) =>
+                            onCheckedChange={() =>
                               handleToggleSuspend(worker.id, worker.suspended)
                             }
+                            disabled={toggleSuspendMutation.isPending}
                             data-testid={`switch-suspend-${worker.id}`}
                           />
                         </div>
@@ -172,6 +191,12 @@ export default function AdminPanel() {
                   </CardContent>
                 </Card>
               ))}
+
+              {filteredWorkers.length === 0 && (
+                <div className="text-center py-8 text-muted-foreground">
+                  No workers found
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

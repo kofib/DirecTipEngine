@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRoute } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -6,6 +6,73 @@ import { Button } from "@/components/ui/button";
 import WorkerHeader from "@/components/WorkerHeader";
 import TipAmountSelector from "@/components/TipAmountSelector";
 import TipSuccessScreen from "@/components/TipSuccessScreen";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
+
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY || "");
+
+function PaymentForm({
+  amount,
+  handle,
+  note,
+  onSuccess,
+}: {
+  amount: number;
+  handle: string;
+  note: string;
+  onSuccess: () => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!stripe || !elements) {
+      return;
+    }
+
+    setIsProcessing(true);
+    setErrorMessage("");
+
+    const { error } = await stripe.confirmPayment({
+      elements,
+      confirmParams: {
+        return_url: window.location.href,
+      },
+      redirect: "if_required",
+    });
+
+    if (error) {
+      setErrorMessage(error.message || "Payment failed");
+      setIsProcessing(false);
+    } else {
+      onSuccess();
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <PaymentElement />
+      {errorMessage && (
+        <p className="text-sm text-destructive">{errorMessage}</p>
+      )}
+      <Button
+        type="submit"
+        className="w-full"
+        size="lg"
+        disabled={isProcessing || !stripe}
+        data-testid="button-submit-payment"
+      >
+        {isProcessing ? "Processing..." : `Send $${(amount / 100).toFixed(2)} Tip`}
+      </Button>
+    </form>
+  );
+}
 
 export default function TipPage() {
   const [, params] = useRoute("/:handle");
@@ -13,38 +80,64 @@ export default function TipPage() {
 
   const [selectedAmount, setSelectedAmount] = useState<number>();
   const [note, setNote] = useState("");
-  const [showPayment, setShowPayment] = useState(false);
+  const [clientSecret, setClientSecret] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
 
-  const workerData = {
-    displayName: "Sarah Johnson",
-    handle: handle,
-    photoUrl: undefined,
-    tipsEnabled: true,
-    currency: "USD",
-  };
+  const { data: workerData, isLoading } = useQuery({
+    queryKey: ["/api/qr", handle],
+    queryFn: () => api.worker.getByHandle(handle),
+  });
+
+  const createIntentMutation = useMutation({
+    mutationFn: (amountCents: number) =>
+      api.tips.createIntent({
+        handle,
+        amountCents,
+        note: note || undefined,
+      }),
+    onSuccess: (data) => {
+      setClientSecret(data.clientSecret);
+    },
+  });
 
   const handleAmountSelect = (amount: number) => {
     setSelectedAmount(amount);
-    setShowPayment(true);
-    console.log("Amount selected, showing payment form");
+    createIntentMutation.mutate(amount);
   };
 
-  const handlePayment = () => {
-    console.log("Processing payment...");
-    setTimeout(() => {
-      setShowSuccess(true);
-      console.log("Payment successful!");
-    }, 1500);
+  const handlePaymentSuccess = () => {
+    setShowSuccess(true);
   };
 
   const handleSendAnother = () => {
     setSelectedAmount(undefined);
     setNote("");
-    setShowPayment(false);
+    setClientSecret("");
     setShowSuccess(false);
-    console.log("Reset for another tip");
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  if (!workerData) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardContent className="py-12 text-center">
+            <h2 className="text-xl font-semibold mb-2">Worker not found</h2>
+            <p className="text-muted-foreground">
+              This tip page doesn't exist or has been deactivated.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (showSuccess && selectedAmount) {
     return (
@@ -69,56 +162,77 @@ export default function TipPage() {
           tipsEnabled={workerData.tipsEnabled}
         />
 
-        <div className="space-y-4">
-          <TipAmountSelector
-            onAmountSelect={handleAmountSelect}
-            selectedAmount={selectedAmount}
-          />
+        {!workerData.tipsEnabled ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <p className="text-muted-foreground">
+                Tips are temporarily unavailable for this worker.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-4">
+            <TipAmountSelector
+              onAmountSelect={handleAmountSelect}
+              selectedAmount={selectedAmount}
+            />
 
-          {selectedAmount && (
-            <>
-              <div className="space-y-2">
-                <label htmlFor="note" className="text-sm font-medium">
-                  Add a note (optional)
-                </label>
-                <Textarea
-                  id="note"
-                  placeholder="Leave a message..."
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  maxLength={200}
-                  className="resize-none"
-                  rows={3}
-                  data-testid="textarea-note"
-                />
-                <p className="text-xs text-muted-foreground text-right">
-                  {note.length}/200
-                </p>
-              </div>
+            {selectedAmount && (
+              <>
+                <div className="space-y-2">
+                  <label htmlFor="note" className="text-sm font-medium">
+                    Add a note (optional)
+                  </label>
+                  <Textarea
+                    id="note"
+                    placeholder="Leave a message..."
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    maxLength={200}
+                    className="resize-none"
+                    rows={3}
+                    data-testid="textarea-note"
+                  />
+                  <p className="text-xs text-muted-foreground text-right">
+                    {note.length}/200
+                  </p>
+                </div>
 
-              {showPayment && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg">Payment Details</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="p-4 bg-muted/50 rounded-md text-center text-sm text-muted-foreground">
-                      Stripe Payment Element would appear here
-                    </div>
-                    <Button
-                      onClick={handlePayment}
-                      className="w-full"
-                      size="lg"
-                      data-testid="button-submit-payment"
-                    >
-                      Send ${(selectedAmount / 100).toFixed(2)} Tip
-                    </Button>
-                  </CardContent>
-                </Card>
-              )}
-            </>
-          )}
-        </div>
+                {clientSecret && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Payment Details</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <Elements stripe={stripePromise} options={{ clientSecret }}>
+                        <PaymentForm
+                          amount={selectedAmount}
+                          handle={handle}
+                          note={note}
+                          onSuccess={handlePaymentSuccess}
+                        />
+                      </Elements>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {createIntentMutation.isPending && (
+                  <p className="text-center text-sm text-muted-foreground">
+                    Preparing payment...
+                  </p>
+                )}
+
+                {createIntentMutation.isError && (
+                  <Card className="border-destructive">
+                    <CardContent className="py-4 text-center text-destructive">
+                      Failed to create payment. Please try again.
+                    </CardContent>
+                  </Card>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

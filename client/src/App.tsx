@@ -3,11 +3,13 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AuthProvider, RequireAuth, RequireAdmin } from "@/hooks/useAuth";
 import Home from "@/pages/Home";
 import Login from "@/pages/Login";
 import TipPage from "@/pages/TipPage";
 import Dashboard from "@/pages/Dashboard";
 import QRPage from "@/pages/QRPage";
+import Onboarding from "@/pages/Onboarding";
 import AdminPanel from "@/pages/AdminPanel";
 import NotFound from "@/pages/not-found";
 
@@ -16,9 +18,26 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/login" component={Login} />
-      <Route path="/dashboard" component={Dashboard} />
-      <Route path="/dashboard/qr" component={QRPage} />
-      <Route path="/admin" component={AdminPanel} />
+      <Route path="/onboarding">
+        <RequireAuth>
+          <Onboarding />
+        </RequireAuth>
+      </Route>
+      <Route path="/dashboard">
+        <RequireAuth>
+          <Dashboard />
+        </RequireAuth>
+      </Route>
+      <Route path="/dashboard/qr">
+        <RequireAuth>
+          <QRPage />
+        </RequireAuth>
+      </Route>
+      <Route path="/admin">
+        <RequireAdmin>
+          <AdminPanel />
+        </RequireAdmin>
+      </Route>
       <Route path="/demo" component={TipPage} />
       <Route path="/:handle" component={TipPage} />
       <Route component={NotFound} />
@@ -29,10 +48,12 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Router />
-      </TooltipProvider>
+      <AuthProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Router />
+        </TooltipProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
