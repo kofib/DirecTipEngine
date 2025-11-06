@@ -9,6 +9,7 @@ import Login from "@/pages/Login";
 import TipPage from "@/pages/TipPage";
 import Dashboard from "@/pages/Dashboard";
 import QRPage from "@/pages/QRPage";
+import PayoutSettings from "@/pages/PayoutSettings";
 import Onboarding from "@/pages/Onboarding";
 import AdminPanel from "@/pages/AdminPanel";
 import NotFound from "@/pages/not-found";
@@ -31,6 +32,11 @@ function Router() {
       <Route path="/dashboard/qr">
         <RequireAuth>
           <QRPage />
+        </RequireAuth>
+      </Route>
+      <Route path="/dashboard/settings">
+        <RequireAuth>
+          <PayoutSettings />
         </RequireAuth>
       </Route>
       <Route path="/admin">

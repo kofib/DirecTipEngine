@@ -160,31 +160,54 @@ export default function AdminPanel() {
                         <div className="text-sm text-muted-foreground">@{worker.handle}</div>
                       </div>
 
-                      <div className="flex items-center gap-4">
-                        <div className="text-right text-sm">
-                          {worker.tipsEnabled ? (
-                            <Badge variant="default">Tips Enabled</Badge>
-                          ) : (
-                            <Badge variant="secondary">Pending</Badge>
-                          )}
-                        </div>
-
+                      <div className="flex flex-col items-end gap-2">
                         <div className="flex items-center gap-2">
-                          <label
-                            htmlFor={`suspend-${worker.id}`}
-                            className="text-sm font-medium"
-                          >
-                            Suspend
-                          </label>
-                          <Switch
-                            id={`suspend-${worker.id}`}
-                            checked={worker.suspended}
-                            onCheckedChange={() =>
-                              handleToggleSuspend(worker.id, worker.suspended)
-                            }
-                            disabled={toggleSuspendMutation.isPending}
-                            data-testid={`switch-suspend-${worker.id}`}
-                          />
+                          <div className="flex flex-wrap gap-1">
+                            {worker.tipsEnabled ? (
+                              <Badge variant="default" data-testid={`badge-tips-${worker.id}`}>Tips Enabled</Badge>
+                            ) : (
+                              <Badge variant="secondary" data-testid={`badge-tips-${worker.id}`}>Tips Pending</Badge>
+                            )}
+                            {worker.chargesEnabled ? (
+                              <Badge variant="default" className="bg-green-600" data-testid={`badge-charges-${worker.id}`}>Charges OK</Badge>
+                            ) : (
+                              <Badge variant="outline" data-testid={`badge-charges-${worker.id}`}>No Charges</Badge>
+                            )}
+                            {worker.payoutsEnabled ? (
+                              <Badge variant="default" className="bg-blue-600" data-testid={`badge-payouts-${worker.id}`}>Payouts OK</Badge>
+                            ) : (
+                              <Badge variant="outline" data-testid={`badge-payouts-${worker.id}`}>No Payouts</Badge>
+                            )}
+                            {(worker.payoutMethodStatus === "added" || worker.payoutMethodStatus === "verified") && (
+                              <Badge 
+                                variant="outline" 
+                                className="border-green-600 text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950" 
+                                data-testid={`badge-payout-method-${worker.id}`}
+                              >
+                                {worker.payoutMethodStatus === "verified" ? "Bank Verified" : "Bank Added"}
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label
+                              htmlFor={`suspend-${worker.id}`}
+                              className="text-sm font-medium whitespace-nowrap"
+                            >
+                              Suspend
+                            </label>
+                            <Switch
+                              id={`suspend-${worker.id}`}
+                              checked={worker.suspended}
+                              onCheckedChange={() =>
+                                handleToggleSuspend(worker.id, worker.suspended)
+                              }
+                              disabled={toggleSuspendMutation.isPending}
+                              data-testid={`switch-suspend-${worker.id}`}
+                            />
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Account: Custom • KYC: {worker.kycStatus}
                         </div>
                       </div>
                     </div>

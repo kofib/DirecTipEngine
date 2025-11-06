@@ -7,6 +7,7 @@ import { useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import ConnectOnboarding from "@/components/ConnectOnboarding";
 
 export default function Onboarding() {
   const [handle, setHandle] = useState("");
@@ -14,6 +15,8 @@ export default function Onboarding() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { worker } = useAuth();
+  const [embeddedClientSecret, setEmbeddedClientSecret] = useState<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const createWorkerMutation = useMutation({
     mutationFn: () =>
@@ -22,11 +25,28 @@ export default function Onboarding() {
         displayName: displayName.trim(),
       }),
     onSuccess: (data) => {
-      toast({
-        title: "Profile created!",
-        description: "Redirecting to Stripe to complete onboarding...",
-      });
-      window.location.href = data.onboardingUrl;
+      if (data.useEmbedded && data.embeddedClientSecret) {
+        // Use embedded onboarding
+        toast({
+          title: "Profile created!",
+          description: "Complete your Stripe account setup below.",
+        });
+        setEmbeddedClientSecret(data.embeddedClientSecret);
+        setShowOnboarding(true);
+      } else if (data.onboardingUrl) {
+        // Fallback to redirect-based onboarding
+        toast({
+          title: "Profile created!",
+          description: "Redirecting to Stripe to complete onboarding...",
+        });
+        window.location.href = data.onboardingUrl;
+      } else {
+        toast({
+          title: "Error",
+          description: "No onboarding method available",
+          variant: "destructive",
+        });
+      }
     },
     onError: (error: any) => {
       toast({
@@ -46,6 +66,34 @@ export default function Onboarding() {
     e.preventDefault();
     createWorkerMutation.mutate();
   };
+
+  const handleOnboardingExit = () => {
+    toast({
+      title: "Onboarding started!",
+      description: "Complete the remaining steps to activate your account.",
+    });
+    setLocation("/dashboard");
+  };
+
+  // Show embedded onboarding flow
+  if (showOnboarding && embeddedClientSecret) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-muted/30">
+        <div className="w-full max-w-4xl">
+          <div className="text-center mb-6">
+            <h1 className="text-3xl font-bold">Complete Your Account Setup</h1>
+            <p className="text-muted-foreground mt-2">
+              Verify your information to start receiving tips
+            </p>
+          </div>
+          <ConnectOnboarding
+            clientSecret={embeddedClientSecret}
+            onExit={handleOnboardingExit}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-muted/30">

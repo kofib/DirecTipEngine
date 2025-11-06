@@ -17,7 +17,21 @@ export interface Worker {
   kycStatus: "pending" | "verified" | "restricted";
   tipsEnabled: boolean;
   suspended: boolean;
+  chargesEnabled?: boolean;
+  payoutsEnabled?: boolean;
+  payoutMethodStatus?: "none" | "added" | "verified";
   createdAt: string;
+}
+
+export interface ConnectStatus {
+  accountCreated: boolean;
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  tipsEnabled: boolean;
+  requirementsCurrentlyDue: string[];
+  requirementsPendingVerification?: string[];
+  disabledReason?: string | null;
+  hasExternalAccount?: boolean;
 }
 
 export interface Tip {
@@ -66,7 +80,12 @@ export const api = {
       country?: string;
       currency?: string;
     }) =>
-      apiRequest<{ worker: Worker; onboardingUrl: string }>("/api/worker", {
+      apiRequest<{
+        worker: Worker;
+        onboardingUrl?: string;
+        embeddedClientSecret?: string;
+        useEmbedded: boolean;
+      }>("/api/worker", {
         method: "POST",
         body: JSON.stringify(data),
       }),
@@ -81,10 +100,31 @@ export const api = {
         } | null;
       }>("/api/worker"),
 
-    refreshConnectLink: () =>
-      apiRequest<{ onboardingUrl: string }>("/api/worker/connect/refresh", {
+    createConnectSession: () =>
+      apiRequest<{
+        embeddedClientSecret?: string;
+        accountLinkUrl?: string;
+        useEmbedded: boolean;
+      }>("/api/worker/connect/create", {
         method: "POST",
       }),
+
+    getConnectStatus: () =>
+      apiRequest<ConnectStatus>("/api/worker/connect/status"),
+
+    attachPayoutMethod: (bankToken: string) =>
+      apiRequest<{ success: boolean }>("/api/worker/payout-method", {
+        method: "POST",
+        body: JSON.stringify({ bankToken }),
+      }),
+
+    refreshConnectLink: () =>
+      apiRequest<{ onboardingUrl?: string; embeddedClientSecret?: string }>(
+        "/api/worker/connect/refresh",
+        {
+          method: "POST",
+        }
+      ),
 
     getByHandle: (handle: string) =>
       apiRequest<{

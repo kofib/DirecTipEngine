@@ -3,10 +3,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import DashboardStats from "@/components/DashboardStats";
 import TipsList from "@/components/TipsList";
-import { LayoutDashboard, QrCode, LogOut, AlertCircle } from "lucide-react";
+import { LayoutDashboard, QrCode, LogOut, Settings } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import AccountStatusBanner from "@/components/AccountStatusBanner";
 
 export default function Dashboard() {
   const [location, setLocation] = useLocation();
@@ -22,6 +23,13 @@ export default function Dashboard() {
     queryKey: ["/api/me/tips"],
     queryFn: () => api.tips.getMyTips(),
     enabled: !!worker,
+  });
+
+  const { data: statusData } = useQuery({
+    queryKey: ["/api/worker/connect/status"],
+    queryFn: api.worker.getConnectStatus,
+    enabled: !!worker && !worker.tipsEnabled,
+    refetchInterval: 10000, // Poll for status updates if not enabled
   });
 
   if (isLoading) {
@@ -69,6 +77,16 @@ export default function Dashboard() {
                   My QR
                 </Button>
               </Link>
+              <Link href="/dashboard/settings">
+                <Button
+                  variant={location === "/dashboard/settings" ? "default" : "ghost"}
+                  size="sm"
+                  data-testid="link-settings"
+                >
+                  <Settings className="w-4 h-4 mr-2" />
+                  Settings
+                </Button>
+              </Link>
               <Button variant="ghost" size="sm" onClick={logout} data-testid="button-logout">
                 <LogOut className="w-4 h-4" />
               </Button>
@@ -86,25 +104,11 @@ export default function Dashboard() {
             </p>
           </div>
 
-          {!worker.tipsEnabled && (
-            <Card className="border-yellow-500/50 bg-yellow-500/10">
-              <CardContent className="p-4 flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5" />
-                <div className="flex-1">
-                  <h3 className="font-semibold text-yellow-900 dark:text-yellow-100">
-                    Complete Stripe Onboarding
-                  </h3>
-                  <p className="text-sm text-yellow-800 dark:text-yellow-200 mt-1">
-                    You need to complete your Stripe Connect onboarding to start receiving tips.
-                  </p>
-                  <Link href="/onboarding">
-                    <Button variant="outline" size="sm" className="mt-3">
-                      Complete Onboarding
-                    </Button>
-                  </Link>
-                </div>
-              </CardContent>
-            </Card>
+          {!worker.tipsEnabled && statusData && (
+            <AccountStatusBanner
+              status={statusData}
+              onCompleteOnboarding={() => setLocation("/dashboard/settings")}
+            />
           )}
 
           <DashboardStats stats={stats} />
