@@ -6,6 +6,7 @@ import { z } from "zod";
 export const kycStatusEnum = pgEnum("kyc_status", ["pending", "verified", "restricted"]);
 export const tipStatusEnum = pgEnum("tip_status", ["succeeded", "refunded", "disputed", "failed", "pending"]);
 export const actorTypeEnum = pgEnum("actor_type", ["system", "admin", "worker"]);
+export const payoutMethodStatusEnum = pgEnum("payout_method_status", ["none", "added", "verified"]);
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -24,7 +25,10 @@ export const workers = pgTable("workers", {
   currency: text("currency").notNull().default("USD"),
   connectAccountId: text("connect_account_id"),
   kycStatus: kycStatusEnum("kyc_status").notNull().default("pending"),
+  chargesEnabled: boolean("charges_enabled").notNull().default(false),
+  payoutsEnabled: boolean("payouts_enabled").notNull().default(false),
   tipsEnabled: boolean("tips_enabled").notNull().default(false),
+  payoutMethodStatus: payoutMethodStatusEnum("payout_method_status").notNull().default("none"),
   suspended: boolean("suspended").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

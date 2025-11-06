@@ -9,11 +9,17 @@ import { generateToken, requireAuth, requireAdmin } from "./auth";
 import {
   createConnectAccount,
   createAccountLink,
+  createAccountSession,
+  createFinancialConnectionsSession,
+  attachBankAccount,
   getAccount,
+  getAccountStatus,
   createPaymentIntent,
   constructWebhookEvent,
   getPlatformFeeBps,
   calculateFees,
+  isEmbeddedOnboardingEnabled,
+  isFinancialConnectionsEnabled,
   stripe,
 } from "./stripe";
 import { insertWorkerSchema } from "@shared/schema";
@@ -152,12 +158,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         connectAccountId: account.id,
       });
 
-      const accountLink = await createAccountLink(
-        account.id,
-        `${APP_URL}/api/worker/connect/refresh`,
-        `${APP_URL}/dashboard`
-      );
-
       await storage.createAuditLog({
         actorType: "worker",
         actorId: user.id,
@@ -167,10 +167,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         metaJson: { connectAccountId: account.id },
       });
 
-      res.json({
-        worker: { ...worker, connectAccountId: account.id },
-        onboardingUrl: accountLink.url,
-      });
+      // Return either embedded client secret or account link URL
+      if (isEmbeddedOnboardingEnabled()) {
+        const accountSession = await createAccountSession(account.id);
+        res.json({
+          worker: { ...worker, connectAccountId: account.id },
+          embeddedClientSecret: accountSession.client_secret,
+          useEmbedded: true,
+        });
+      } else {
+        const accountLink = await createAccountLink(
+          account.id,
+          `${APP_URL}/api/worker/connect/refresh`,
+          `${APP_URL}/dashboard`
+        );
+        res.json({
+          worker: { ...worker, connectAccountId: account.id },
+          onboardingUrl: accountLink.url,
+          useEmbedded: false,
+        });
+      }
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: fromZodError(error).toString() });
@@ -180,6 +196,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Create or refresh onboarding session/link for Connect Custom account
+  app.post("/api/worker/connect/create", requireAuth, async (req, res) => {
+    try {
+      const user = req.user!;
+      const worker = await storage.getWorkerByUserId(user.id);
+
+      if (!worker || !worker.connectAccountId) {
+        return res.status(404).json({ error: "Worker profile not found" });
+      }
+
+      if (isEmbeddedOnboardingEnabled()) {
+        const accountSession = await createAccountSession(worker.connectAccountId);
+        res.json({
+          embeddedClientSecret: accountSession.client_secret,
+          useEmbedded: true,
+        });
+      } else {
+        const accountLink = await createAccountLink(
+          worker.connectAccountId,
+          `${APP_URL}/api/worker/connect/refresh`,
+          `${APP_URL}/dashboard`
+        );
+        res.json({
+          accountLinkUrl: accountLink.url,
+          useEmbedded: false,
+        });
+      }
+    } catch (error) {
+      console.error("Connect create error:", error);
+      res.status(500).json({ error: "Failed to create onboarding session" });
+    }
+  });
+
+  // Legacy endpoint for backwards compatibility
   app.post("/api/worker/connect/refresh", requireAuth, async (req, res) => {
     try {
       const user = req.user!;
@@ -189,16 +239,128 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Worker profile not found" });
       }
 
-      const accountLink = await createAccountLink(
-        worker.connectAccountId,
-        `${APP_URL}/api/worker/connect/refresh`,
-        `${APP_URL}/dashboard`
-      );
-
-      res.json({ onboardingUrl: accountLink.url });
+      if (isEmbeddedOnboardingEnabled()) {
+        const accountSession = await createAccountSession(worker.connectAccountId);
+        res.json({ embeddedClientSecret: accountSession.client_secret });
+      } else {
+        const accountLink = await createAccountLink(
+          worker.connectAccountId,
+          `${APP_URL}/api/worker/connect/refresh`,
+          `${APP_URL}/dashboard`
+        );
+        res.json({ onboardingUrl: accountLink.url });
+      }
     } catch (error) {
       console.error("Connect refresh error:", error);
       res.status(500).json({ error: "Failed to refresh onboarding link" });
+    }
+  });
+
+  // Get Connect account status
+  app.get("/api/worker/connect/status", requireAuth, async (req, res) => {
+    try {
+      const user = req.user!;
+      const worker = await storage.getWorkerByUserId(user.id);
+
+      if (!worker) {
+        return res.status(404).json({ error: "Worker profile not found" });
+      }
+
+      if (!worker.connectAccountId) {
+        return res.json({
+          accountCreated: false,
+          chargesEnabled: false,
+          payoutsEnabled: false,
+          tipsEnabled: false,
+          requirementsCurrentlyDue: [],
+        });
+      }
+
+      const status = await getAccountStatus(worker.connectAccountId);
+
+      res.json({
+        accountCreated: true,
+        chargesEnabled: status.chargesEnabled,
+        payoutsEnabled: status.payoutsEnabled,
+        tipsEnabled: worker.tipsEnabled && !worker.suspended,
+        requirementsCurrentlyDue: status.requirementsCurrentlyDue,
+        requirementsPendingVerification: status.requirementsPendingVerification,
+        disabledReason: status.disabledReason,
+        hasExternalAccount: status.externalAccounts.length > 0,
+      });
+    } catch (error) {
+      console.error("Connect status error:", error);
+      res.status(500).json({ error: "Failed to fetch account status" });
+    }
+  });
+
+  // Attach bank account to Connect Custom account
+  app.post("/api/worker/payout-method", requireAuth, async (req, res) => {
+    try {
+      const schema = z.object({
+        bankToken: z.string(),
+      });
+
+      const { bankToken } = schema.parse(req.body);
+      const user = req.user!;
+      const worker = await storage.getWorkerByUserId(user.id);
+
+      if (!worker || !worker.connectAccountId) {
+        return res.status(404).json({ error: "Worker profile not found" });
+      }
+
+      const externalAccount = await attachBankAccount(
+        worker.connectAccountId,
+        bankToken
+      );
+
+      await storage.updateWorker(worker.id, {
+        payoutMethodStatus: "added",
+      });
+
+      await storage.createAuditLog({
+        actorType: "worker",
+        actorId: user.id,
+        action: "payout_method_added",
+        subjectTable: "workers",
+        subjectId: worker.id,
+        metaJson: { externalAccountId: externalAccount.id },
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: fromZodError(error).toString() });
+      }
+      console.error("Payout method error:", error);
+      res.status(500).json({ error: "Failed to add payout method" });
+    }
+  });
+
+  // Create Financial Connections session for bank account collection
+  app.post("/api/worker/connect/financial-connections", requireAuth, async (req, res) => {
+    try {
+      const user = req.user!;
+      const worker = await storage.getWorkerByUserId(user.id);
+
+      if (!worker || !worker.connectAccountId) {
+        return res.status(404).json({ error: "Worker profile not found" });
+      }
+
+      if (!isFinancialConnectionsEnabled()) {
+        return res.status(400).json({
+          error: "Financial Connections is not enabled. Use manual bank token flow.",
+        });
+      }
+
+      const session = await createFinancialConnectionsSession(worker.connectAccountId);
+
+      res.json({
+        clientSecret: session.client_secret,
+      });
+    } catch (error) {
+      console.error("Financial Connections error:", error);
+      res.status(500).json({ error: "Failed to create Financial Connections session" });
     }
   });
 
@@ -271,6 +433,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const worker = await storage.getWorkerByHandle(handle);
       if (!worker) {
         return res.status(404).json({ error: "Worker not found" });
+      }
+
+      if (!worker.chargesEnabled) {
+        return res.status(400).json({
+          error: "Worker has not completed onboarding. Please complete your Stripe account setup to receive tips.",
+        });
       }
 
       if (!worker.tipsEnabled) {
@@ -407,11 +575,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           if (worker) {
             const chargesEnabled = account.charges_enabled || false;
-            const kycStatus = account.requirements?.disabled_reason ? "restricted" : "verified";
+            const payoutsEnabled = account.payouts_enabled || false;
+            
+            // Determine KYC status based on requirements
+            let kycStatus: "pending" | "verified" | "restricted" = "pending";
+            if (account.requirements?.disabled_reason) {
+              kycStatus = "restricted";
+            } else if (chargesEnabled && payoutsEnabled) {
+              kycStatus = "verified";
+            }
+
+            // Enable tips only when charges_enabled is true AND worker is not suspended
+            const tipsEnabled = chargesEnabled && !worker.suspended;
+
+            // Update payout method status if external account exists
+            const hasExternalAccount = account.external_accounts?.data?.length > 0;
+            const payoutMethodStatus = hasExternalAccount ? "added" : "none";
 
             await storage.updateWorker(worker.id, {
-              tipsEnabled: chargesEnabled,
+              chargesEnabled,
+              payoutsEnabled,
+              tipsEnabled,
               kycStatus,
+              payoutMethodStatus,
             });
 
             await storage.createAuditLog({
@@ -419,7 +605,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               action: "worker_account_updated",
               subjectTable: "workers",
               subjectId: worker.id,
-              metaJson: { chargesEnabled, kycStatus },
+              metaJson: {
+                chargesEnabled,
+                payoutsEnabled,
+                tipsEnabled,
+                kycStatus,
+                requirementsCurrentlyDue: account.requirements?.currently_due || [],
+                requirementsPendingVerification: account.requirements?.pending_verification || [],
+              },
             });
           }
           break;
